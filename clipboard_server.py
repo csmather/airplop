@@ -16,6 +16,7 @@ First-time Windows setup (run setup_windows.ps1 as Admin in PowerShell).
 import base64
 import io
 import json
+import logging
 import queue
 import socket
 import subprocess
@@ -23,6 +24,23 @@ import threading
 import time
 
 from flask import Flask, Response, jsonify, render_template_string, request
+
+
+class _DropTLSProbes(logging.Filter):
+    """Silence werkzeug 400s from phones that try HTTPS before falling back to HTTP.
+
+    iOS Safari sends a TLS ClientHello (starts with \\x16\\x03) as an HTTPS-upgrade
+    probe; we only speak plain HTTP, so these show up as noisy Bad Request logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "\\x16\\x03" in msg or "Bad HTTP/0.9" in msg:
+            return False
+        return True
+
+
+logging.getLogger("werkzeug").addFilter(_DropTLSProbes())
 
 PORT = 8765
 MDNS_HOSTNAME = "airplop"  # published as airplop.local on the LAN
