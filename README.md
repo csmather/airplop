@@ -7,8 +7,9 @@ Send text and links from your PC to iPhones on the same local network. No apps r
 A Flask server runs in WSL2 and pushes clipboard content to connected phones via Server-Sent Events. You type/paste on the PC, phones see it instantly.
 
 - **Sender** (PC): `http://localhost:8765` — paste text, hit Send
-- **Receiver** (phone): `http://<your-windows-ip>:8765/view` — opens in Safari, auto-updates via SSE
+- **Receiver** (phone): `http://airplop.local:8765/view` — opens in Safari, auto-updates via SSE
 - QR code on the sender page for easy phone setup
+- Phone bookmark survives reboots: the server advertises `airplop.local` over mDNS, so the URL stays stable even if the LAN IP changes
 
 ## Setup
 
@@ -21,19 +22,29 @@ A Flask server runs in WSL2 and pushes clipboard content to connected phones via
 ### Install
 
 ```bash
-pip install flask 'qrcode[pil]'
+pip install flask 'qrcode[pil]' zeroconf
 ```
 
 ### Windows networking (one-time, as Admin)
 
-Port-forwards from Windows to WSL2 and opens the firewall:
+Opens the firewall and registers a Scheduled Task so the network setup
+re-runs automatically at every logon:
 
 ```powershell
-# Run as Administrator
+# Run as Administrator (ONCE — the script self-installs a logon task)
 .\setup_windows.ps1
 ```
 
-> WSL2 gets a new IP on each reboot — re-run this script after rebooting.
+The script auto-detects WSL2 mirrored networking mode (recommended) and skips
+port forwarding when it's not needed. To enable mirrored mode, add this to
+`%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode = mirrored
+```
+
+then run `wsl --shutdown`.
 
 ### Run
 
@@ -42,3 +53,4 @@ python3 clipboard_server.py
 ```
 
 Open `http://localhost:8765` on your PC, scan the QR code with your phone.
+The phone bookmark is `http://airplop.local:8765/view` — stable across reboots.

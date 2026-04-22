@@ -5,7 +5,7 @@ airplop
 Run this in WSL2. Your PC controls it; phones just open a URL in Safari.
 
 Install deps:
-    pip install flask qrcode[pil] --break-system-packages
+    pip install flask 'qrcode[pil]' zeroconf --break-system-packages
 
 Run:
     python3 clipboard_server.py
@@ -19,13 +19,13 @@ import json
 import queue
 import socket
 import subprocess
-import sys
 import threading
 import time
 
 from flask import Flask, Response, jsonify, render_template_string, request
 
 PORT = 8765
+MDNS_HOSTNAME = "airplop"  # published as airplop.local on the LAN
 app = Flask(__name__)
 
 # ── shared state ─────────────────────────────────────────────────────────────
@@ -35,6 +35,26 @@ state_lock = threading.Lock()
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def get_lan_ip() -> str | None:
+    """Find the local outbound-facing IP without hitting the network.
+
+    Opens a UDP socket toward a public address; no packet is sent, but the
+    kernel picks the interface it *would* use, which is the LAN-facing one.
+    In WSL2 mirrored-networking mode this returns the shared host LAN IP.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+    if ip.startswith(("127.", "169.254.", "172.")):
+        return None
+    return ip
 
 
 def get_windows_ip() -> str | None:
@@ -75,6 +95,29 @@ def make_qr_base64(url: str) -> str | None:
         img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode()
     except Exception:
+        return None
+
+
+def start_mdns(ip: str, port: int):
+    """Advertise airplop.local on the LAN via mDNS. Returns (zc, info) or None."""
+    try:
+        from zeroconf import ServiceInfo, Zeroconf  # type: ignore
+    except ImportError:
+        return None
+    try:
+        info = ServiceInfo(
+            type_="_http._tcp.local.",
+            name=f"{MDNS_HOSTNAME}._http._tcp.local.",
+            addresses=[socket.inet_aton(ip)],
+            port=port,
+            server=f"{MDNS_HOSTNAME}.local.",
+            properties={},
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        return zc, info
+    except Exception as e:
+        print(f"  ⚠  mDNS registration failed: {e}")
         return None
 
 
@@ -174,6 +217,14 @@ SENDER_HTML = """<!DOCTYPE html>
       color: #7c6af7;
       word-break: break-all;
     }
+    .qr-url-fallback {
+      font-family: "Courier New", monospace;
+      font-size: .75rem;
+      color: #666;
+      word-break: break-all;
+      margin-top: 2px;
+    }
+    .qr-urls { display: flex; flex-direction: column; gap: 2px; }
     .qr-img { border-radius: 10px; background: #fff; padding: 8px; width: 140px; height: 140px; }
     .row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
     kbd {
@@ -202,7 +253,12 @@ SENDER_HTML = """<!DOCTYPE html>
       {% if qr_b64 %}
       <img class="qr-img" src="data:image/png;base64,{{ qr_b64 }}" alt="QR code">
       {% endif %}
-      <span class="qr-url">{{ viewer_url }}</span>
+      <div class="qr-urls">
+        <span class="qr-url">{{ viewer_url }}</span>
+        {% if fallback_url and fallback_url != viewer_url %}
+        <span class="qr-url-fallback">fallback: {{ fallback_url }}</span>
+        {% endif %}
+      </div>
     </div>
   </div>
 </div>
@@ -425,14 +481,27 @@ RECEIVER_HTML = """<!DOCTYPE html>
 
 @app.route("/")
 def sender():
-    windows_ip = app.config.get("WINDOWS_IP")
-    viewer_url = (
-        f"http://{windows_ip}:{PORT}/view"
-        if windows_ip
-        else f"http://<your-windows-ip>:{PORT}/view"
+    lan_ip = app.config.get("LAN_IP")
+    mdns_ok = app.config.get("MDNS_OK", False)
+    ip_url = f"http://{lan_ip}:{PORT}/view" if lan_ip else None
+
+    if mdns_ok:
+        viewer_url = f"http://{MDNS_HOSTNAME}.local:{PORT}/view"
+        fallback_url = ip_url
+    elif ip_url:
+        viewer_url = ip_url
+        fallback_url = None
+    else:
+        viewer_url = f"http://<your-lan-ip>:{PORT}/view"
+        fallback_url = None
+
+    qr_b64 = make_qr_base64(viewer_url) if viewer_url.startswith("http://<") is False else None
+    return render_template_string(
+        SENDER_HTML,
+        viewer_url=viewer_url,
+        fallback_url=fallback_url,
+        qr_b64=qr_b64,
     )
-    qr_b64 = make_qr_base64(viewer_url) if windows_ip else None
-    return render_template_string(SENDER_HTML, viewer_url=viewer_url, qr_b64=qr_b64)
 
 
 @app.route("/view")
@@ -491,20 +560,40 @@ if __name__ == "__main__":
     print("\n🔌  airplop")
     print("─" * 40)
 
-    windows_ip = get_windows_ip()
-    if windows_ip:
-        print(f"  Windows IP   : {windows_ip}")
-        print(f"  Sender (PC)  : http://localhost:{PORT}")
-        print(f"  Viewer (phone): http://{windows_ip}:{PORT}/view")
-        app.config["WINDOWS_IP"] = windows_ip
+    lan_ip = get_lan_ip() or get_windows_ip()
+    app.config["LAN_IP"] = lan_ip
+    app.config["MDNS_OK"] = False
+
+    mdns = None
+    if lan_ip:
+        mdns = start_mdns(lan_ip, PORT)
+        app.config["MDNS_OK"] = mdns is not None
+        primary = (
+            f"http://{MDNS_HOSTNAME}.local:{PORT}/view"
+            if mdns
+            else f"http://{lan_ip}:{PORT}/view"
+        )
+        print(f"  LAN IP        : {lan_ip}")
+        print(f"  Sender (PC)   : http://localhost:{PORT}")
+        print(f"  Viewer (phone): {primary}")
+        if mdns:
+            print(f"  Fallback      : http://{lan_ip}:{PORT}/view")
     else:
-        print("  ⚠  Could not detect Windows IP automatically.")
+        print("  ⚠  Could not detect LAN IP automatically.")
         print(f"     Run `ipconfig` in Windows, find your LAN IP,")
         print(f"     then open: http://<your-ip>:{PORT}/view on the phones.")
-        print(f"  Sender (PC)  : http://localhost:{PORT}")
-        app.config["WINDOWS_IP"] = None
+        print(f"  Sender (PC)   : http://localhost:{PORT}")
 
     print("─" * 40)
     print("  Ctrl+C to stop\n")
 
-    app.run(host="0.0.0.0", port=PORT, threaded=True)
+    try:
+        app.run(host="0.0.0.0", port=PORT, threaded=True)
+    finally:
+        if mdns:
+            zc, info = mdns
+            try:
+                zc.unregister_service(info)
+                zc.close()
+            except Exception:
+                pass
