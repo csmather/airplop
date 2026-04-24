@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>airplop</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font: 16px/1.4 system-ui, sans-serif;
+      margin: 0;
+      padding: 24px;
+      max-width: 640px;
+      background: #111;
+      color: #eee;
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .ip { color: #888; font-size: 13px; margin-bottom: 20px; }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 10px;
+      font: inherit;
+      background: #1a1a1a;
+      color: inherit;
+      border: 1px solid #333;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 8px;
+      padding: 10px 16px;
+      font: inherit;
+      background: #2a7;
+      color: #000;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { margin: 16px 0 6px; font-size: 13px; color: #888; }
+    .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 6px; }
+    .status.live .dot { background: #2a7; }
+    pre#received {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 40px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>airplop</h1>
+  <div class="ip">{{.LanIP}}:8765 &middot; airplop.local:8765</div>
+
+  <textarea id="send" placeholder="type here, then send"></textarea>
+  <button id="sendBtn">Send</button>
+
+  <div class="status" id="status"><span class="dot"></span>connecting&hellip;</div>
+  <pre id="received"></pre>
+
+  <script>
+    const sendEl = document.getElementById('send');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+    const receivedEl = document.getElementById('received');
+
+    sendBtn.onclick = async () => {
+      const text = sendEl.value;
+      if (!text) return;
+      sendBtn.disabled = true;
+      try {
+        await fetch('/update', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+
+    // Ctrl+Enter to send
+    sendEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendBtn.click();
+    });
+
+    function connect() {
+      const es = new EventSource('/stream');
+      es.onopen = () => {
+        statusEl.classList.add('live');
+        statusEl.innerHTML = '<span class="dot"></span>connected';
+      };
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          receivedEl.textContent = data.text ?? '';
+        } catch {
+          receivedEl.textContent = ev.data;
+        }
+      };
+      es.onerror = () => {
+        statusEl.classList.remove('live');
+        statusEl.innerHTML = '<span class="dot"></span>reconnecting&hellip;';
+        es.close();
+        setTimeout(connect, 3000);
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>
