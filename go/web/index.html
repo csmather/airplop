@@ -4,63 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>airplop</title>
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      font: 16px/1.4 system-ui, sans-serif;
-      margin: 0;
-      padding: 24px;
-      max-width: 640px;
-      background: #111;
-      color: #eee;
-    }
-    h1 { margin: 0 0 4px; font-size: 22px; }
-    .ip { color: #888; font-size: 13px; margin-bottom: 20px; }
-    textarea {
-      width: 100%;
-      min-height: 100px;
-      padding: 10px;
-      font: inherit;
-      background: #1a1a1a;
-      color: inherit;
-      border: 1px solid #333;
-      border-radius: 6px;
-      box-sizing: border-box;
-    }
-    button {
-      margin-top: 8px;
-      padding: 10px 16px;
-      font: inherit;
-      background: #2a7;
-      color: #000;
-      border: 0;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    button:disabled { opacity: 0.5; cursor: default; }
-    .status { margin: 16px 0 6px; font-size: 13px; color: #888; }
-    .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 6px; }
-    .status.live .dot { background: #2a7; }
-    pre#received {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 6px;
-      padding: 10px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      min-height: 40px;
-      margin: 0;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <h1>airplop</h1>
-  <div class="ip">{{.LanIP}}:8765 &middot; airplop.local:8765</div>
+  <div class="meta">
+    <span class="status" id="status"><span class="dot"></span>connecting</span>
+    <span class="ip">{{.LanIP}}:8765</span>
+  </div>
 
-  <textarea id="send" placeholder="type here, then send"></textarea>
-  <button id="sendBtn">Send</button>
+  <textarea id="send" placeholder="paste here, then send" autofocus></textarea>
 
-  <div class="status" id="status"><span class="dot"></span>connecting&hellip;</div>
+  <button id="sendBtn" disabled aria-label="send">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M8 3V13M3.5 8.5 8 13l4.5-4.5"/>
+    </svg>
+  </button>
+
   <pre id="received"></pre>
 
   <script>
@@ -69,9 +29,13 @@
     const statusEl = document.getElementById('status');
     const receivedEl = document.getElementById('received');
 
+    const syncBtn = () => { sendBtn.disabled = !sendEl.value.trim(); };
+    sendEl.addEventListener('input', syncBtn);
+    syncBtn();
+
     sendBtn.onclick = async () => {
       const text = sendEl.value;
-      if (!text) return;
+      if (!text.trim()) return;
       sendBtn.disabled = true;
       try {
         await fetch('/update', {
@@ -80,13 +44,23 @@
           body: JSON.stringify({ text }),
         });
       } finally {
-        sendBtn.disabled = false;
+        syncBtn();
       }
     };
 
-    // Ctrl+Enter to send
     sendEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendBtn.click();
+    });
+
+    receivedEl.addEventListener('click', async () => {
+      const text = receivedEl.textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        receivedEl.classList.remove('copied');
+        void receivedEl.offsetWidth;
+        receivedEl.classList.add('copied');
+      } catch {}
     });
 
     function connect() {
@@ -105,7 +79,7 @@
       };
       es.onerror = () => {
         statusEl.classList.remove('live');
-        statusEl.innerHTML = '<span class="dot"></span>reconnecting&hellip;';
+        statusEl.innerHTML = '<span class="dot"></span>reconnecting';
         es.close();
         setTimeout(connect, 3000);
       };
