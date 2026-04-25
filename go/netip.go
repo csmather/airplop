@@ -5,24 +5,34 @@ import (
 	"net"
 )
 
-// lanIP returns the first non-loopback IPv4 address bound to any interface.
-// On native Windows this is enough — unlike the WSL2 Python version, there's
-// no virtual 172.x network or PowerShell fallback to worry about.
-func lanIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
+// lanIP returns the first non-loopback IPv4 address and the interface it's
+// bound to. Returning both lets us pin mDNS to the same adapter the HTTP
+// server is reachable on — otherwise zeroconf may advertise on a virtual
+// adapter (WSL vEthernet, Hyper-V) that phones on the Wi-Fi can't see.
+func lanIP() (string, net.Interface, error) {
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "", err
+		return "", net.Interface{}, err
 	}
-	for _, a := range addrs {
-		ipnet, ok := a.(*net.IPNet)
-		if !ok || ipnet.IP.IsLoopback() {
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		ip4 := ipnet.IP.To4()
-		if ip4 == nil {
+		addrs, err := iface.Addrs()
+		if err != nil {
 			continue
 		}
-		return ip4.String(), nil
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok || ipnet.IP.IsLoopback() {
+				continue
+			}
+			ip4 := ipnet.IP.To4()
+			if ip4 == nil {
+				continue
+			}
+			return ip4.String(), iface, nil
+		}
 	}
-	return "", errors.New("no non-loopback IPv4 address found")
+	return "", net.Interface{}, errors.New("no non-loopback IPv4 address found")
 }

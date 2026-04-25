@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -17,7 +18,7 @@ var webFS embed.FS
 const port = 8765
 
 func main() {
-	ip, err := lanIP()
+	ip, iface, err := lanIP()
 	if err != nil {
 		log.Fatalf("could not detect LAN IP: %v", err)
 	}
@@ -42,11 +43,15 @@ func main() {
 	mux.HandleFunc("POST /update", h.updateHandler)
 
 	srv := &http.Server{
-		Addr:    ":8765",
 		Handler: mux,
 	}
 
-	shutdownMDNS, err := registerMDNS(port)
+	listener, err := net.Listen("tcp4", ":8765")
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+
+	shutdownMDNS, err := registerMDNS(ip, iface, port)
 	if err != nil {
 		log.Printf("mDNS registration failed (continuing): %v", err)
 	} else {
@@ -58,7 +63,7 @@ func main() {
 
 	go func() {
 		log.Printf("airplop listening on http://%s:%d and http://airplop.local:%d", ip, port, port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
 	}()
