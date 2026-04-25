@@ -19,11 +19,10 @@ const port = 8765 // const = compile-time constant
 var webFS embed.FS // //go:embed bakes the file into the binary; directive must be flush against the var
 
 func main() {
-	ip, iface, err := lanIP() // := declares+assigns+infers type; multi-return is idiomatic Go
+	ip, err := lanIP() // := declares+assigns+infers type; multi-return is idiomatic Go
 	if err != nil {
 		log.Fatalf("could not detect LAN IP: %v", err) // logs then os.Exit(1)
 	}
-	log.Printf("LAN IP %s on interface %q (idx=%d)", ip, iface.Name, iface.Index)
 
 	tmpl, err := template.ParseFS(webFS, "web/index.html")
 	if err != nil {
@@ -49,19 +48,12 @@ func main() {
 
 	srv := &http.Server{Handler: mux} // & takes a pointer
 
-	shutdownMDNS, err := registerMDNS(ip, iface, port)
-	if err != nil {
-		log.Printf("mDNS registration failed (continuing): %v", err)
-	} else {
-		defer shutdownMDNS() // defer: runs on function return
-	}
-
 	// ctx cancels on SIGINT/SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() { // goroutine: concurrent execution; cheap (~few KB stack)
-		log.Printf("airplop listening on http://%s:%d and http://airplop.local:%d", ip, port, port)
+		log.Printf("airplop listening on http://%s:%d", ip, port)
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
