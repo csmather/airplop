@@ -10,7 +10,14 @@
 
 ## Language rewrites (for learning)
 
-- [ ] **(next up)** Port to **Go** — `net/http` for SSE, `hashicorp/mdns` for zeroconf. Cross-compile to a single Windows `.exe` and run natively on Windows — eliminates the WSL2 mirrored-mode / port-forward layer entirely.
+- [x] Port to **Go** — `net/http` for SSE, `grandcat/zeroconf` for mDNS. Runs in WSL2 (mirrored mode); the cross-compile-to-`.exe` goal didn't pan out because Go's mDNS libs are flaky on native Windows multicast (see "rainy day" item below).
 - [ ] *(later/maybe)* Port to **Rust** — `axum` + `mdns-sd`. Overkill for the scale, but a bounded project to learn ownership/borrow checker without deadline pressure.
 - [ ] *(later/maybe)* Port to **Node/TypeScript** — Express + an mDNS lib. Smallest delta from Python, smallest learning dividend; only worth it for JS/TS reps.
 - [ ] *(wildcard)* Port to **Elixir (Phoenix + LiveView)** — realtime push is BEAM's sweet spot. Steepest curve, but the actor model is genuinely different from everything else here.
+
+## Rainy-day Go project
+
+- [ ] *(low prio, learning-only)* Make Go port work as a native Windows `.exe`. Replace `grandcat/zeroconf` with platform-tagged mDNS:
+  - `mdns_linux.go` — keep the current `grandcat/zeroconf` path
+  - `mdns_windows.go` — call Windows's built-in mDNS responder via `dnsapi.dll` (`DnsServiceRegister`, available since Win10 1809) using `golang.org/x/sys/windows`. No third-party Go lib, no firewall popup, no fragile multicast-from-Go — Windows does the multicast itself. ~150 lines of syscall wrapping.
+  - Bonus: drops the WSL requirement entirely and gives you a single-file double-clickable distribution.

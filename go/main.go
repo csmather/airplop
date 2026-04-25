@@ -22,6 +22,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not detect LAN IP: %v", err)
 	}
+	log.Printf("LAN IP %s on interface %q (idx=%d)", ip, iface.Name, iface.Index)
 
 	tmpl, err := template.ParseFS(webFS, "web/index.html")
 	if err != nil {
@@ -31,11 +32,7 @@ func main() {
 	h := newHub()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		tmpl.Execute(w, struct{ LanIP string }{LanIP: ip})
 	})

@@ -7,8 +7,9 @@ import (
 )
 
 // registerMDNS advertises the service as `airplop._http._tcp.local.` on the
-// given port, pinning both the advertised IP and the network interface
-// zeroconf sends on. Returns a shutdown func the caller should defer.
+// given port, pinning both the advertised IP and the network interface so
+// zeroconf doesn't auto-pick the wrong one. Returns a shutdown func the
+// caller should defer.
 func registerMDNS(ip string, iface net.Interface, port int) (func(), error) {
 	server, err := zeroconf.RegisterProxy(
 		"airplop",                // instance name
