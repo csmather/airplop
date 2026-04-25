@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -15,7 +16,7 @@ import (
 
 const port = 8765 // const = compile-time constant
 
-//go:embed web/index.html
+//go:embed web
 var webFS embed.FS // //go:embed bakes the file into the binary; directive must be flush against the var
 
 func main() {
@@ -31,12 +32,18 @@ func main() {
 
 	h := newHub()
 
+	staticFS, err := fs.Sub(webFS, "web") // re-roots the FS at web/ so paths resolve as "/style.css" etc
+	if err != nil {
+		log.Fatalf("sub fs: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	// Go 1.22+ pattern syntax; "{$}" anchors to exactly "/"
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { // anonymous func
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		tmpl.Execute(w, struct{ LanIP string }{LanIP: ip}) // anonymous struct as inline type
 	})
+	mux.Handle("GET /style.css", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /stream", h.streamHandler) // method value: bound to h, callable as a func
 	mux.HandleFunc("POST /update", h.updateHandler)
 
